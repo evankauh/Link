@@ -1,59 +1,109 @@
+// src/store/api/connectionsApi.ts
 import { createApi, fakeBaseQuery } from '@reduxjs/toolkit/query/react';
 import { supabase } from '../../services/supabase/client';
-import type { ConnectionSuggestion, ConnectionReason, Friend, FriendshipTier } from '../../types';
+import type { ConnectionSuggestion, ConnectionReason, Friend, Contact, User, ContactFrequency } from '../../types';
+import { loadContacts } from '../../utils/contactsStorage';
+import {
+  CONTACT_FREQUENCY_CONFIG,
+  DEFAULT_CONTACT_FREQUENCY,
+} from '../../constants/contactFrequency';
 
-// Connection suggestion algorithm implementation
+const FREQUENCY_PRIORITY: Record<ContactFrequency, number> = {
+  biweekly: 65,
+  monthly: 50,
+  quarterly: 35,
+  semiannual: 25,
+};
+
+const BASE_RANDOMNESS = 8;
+
+const computeCadenceScore = (
+  frequency: ContactFrequency,
+  lastContacted: string | null | undefined,
+  referenceDate: Date,
+) => {
+  const cadenceDays = CONTACT_FREQUENCY_CONFIG[frequency].days;
+  const priority = FREQUENCY_PRIORITY[frequency];
+
+  if (!lastContacted) {
+    return {
+      score: priority + 40,
+      reason: 'New connection — no contact recorded yet',
+    };
+  }
+
+  const now = referenceDate.getTime();
+  const last = new Date(lastContacted).getTime();
+  const daysSince = Math.max(0, Math.floor((now - last) / (1000 * 60 * 60 * 24)));
+  const ratio = cadenceDays ? daysSince / cadenceDays : 0;
+
+  if (ratio >= 1) {
+    const overdueDays = daysSince - cadenceDays;
+    const overdueBoost = Math.min(60, 30 + overdueDays * 0.6);
+    return {
+      score: priority + overdueBoost,
+      reason: overdueDays > 0
+        ? `Over cadence by ${overdueDays} day${overdueDays === 1 ? '' : 's'}`
+        : `Due now (every ${cadenceDays} days)`
+    };
+  }
+
+  const progressBoost = Math.max(10, ratio * 25);
+  const daysUntilDue = Math.max(0, cadenceDays - daysSince);
+  return {
+    score: priority + progressBoost,
+    reason: `Due in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`,
+  };
+};
+
+const computeBirthdayBonus = (iso?: string | null) => {
+  if (!iso) return null;
+  const birthday = new Date(iso);
+  if (Number.isNaN(birthday.getTime())) return null;
+
+  const now = new Date();
+  const currentYear = now.getUTCFullYear();
+  const nextOccurrence = new Date(Date.UTC(currentYear, birthday.getUTCMonth(), birthday.getUTCDate()));
+  const todayStart = new Date(now.toISOString().slice(0, 10));
+  if (nextOccurrence < todayStart) {
+    nextOccurrence.setUTCFullYear(currentYear + 1);
+  }
+  const diffDays = Math.ceil((nextOccurrence.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+  return { diffDays, nextOccurrence };
+};
+
+// Improved connection suggestion algorithm
 const calculateConnectionScore = (
   friend: Friend,
   upcomingEvents: any[],
   currentDate: Date
 ): { score: number; reasons: ConnectionReason[] } => {
-  let score = 0;
   const reasons: ConnectionReason[] = [];
-  
-  // Base score by friendship tier
-  const tierScores: Record<FriendshipTier, number> = {
-    'best_friend': 40,
-    'close_friend': 30,
-    'good_friend': 20,
-    'acquaintance': 10,
-  };
-  
-  const tierScore = tierScores[friend.friendshipTier];
-  score += tierScore;
+  const frequency = friend.contactFrequency ?? DEFAULT_CONTACT_FREQUENCY;
+  const priorityReasonWeight = FREQUENCY_PRIORITY[frequency];
   reasons.push({
-    type: 'tier_priority',
-    description: `${friend.friendshipTier.replace('_', ' ')} priority`,
-    weight: tierScore,
+    type: 'cadence_priority',
+    description: `Cadence: ${CONTACT_FREQUENCY_CONFIG[frequency].label}`,
+    weight: priorityReasonWeight,
   });
 
-  // Last contacted scoring
-  if (friend.lastContacted) {
-    const lastContactedDate = new Date(friend.lastContacted);
-    const daysSinceContact = Math.floor(
-      (currentDate.getTime() - lastContactedDate.getTime()) / (1000 * 3600 * 24)
-    );
-    
-    let contactScore = 0;
-    if (daysSinceContact > 30) contactScore = 30;
-    else if (daysSinceContact > 14) contactScore = 20;
-    else if (daysSinceContact > 7) contactScore = 10;
-    
-    if (contactScore > 0) {
-      score += contactScore;
-      reasons.push({
-        type: 'last_contacted',
-        description: `Haven't connected in ${daysSinceContact} days`,
-        weight: contactScore,
-      });
-    }
-  } else {
-    // Never contacted gets high priority
-    score += 25;
+  const cadenceResult = computeCadenceScore(frequency, friend.lastContacted, currentDate);
+  reasons.push({
+    type: 'last_contacted',
+    description: cadenceResult.reason,
+    weight: Math.max(5, cadenceResult.score - priorityReasonWeight),
+  });
+
+  let score = cadenceResult.score + Math.random() * BASE_RANDOMNESS;
+
+  const birthdayBonus = computeBirthdayBonus(friend.birthday ?? friend.friend?.birthday);
+  if (birthdayBonus && birthdayBonus.diffDays <= 30) {
+    const weight = birthdayBonus.diffDays <= 7 ? 50 : 30;
+    score += weight;
     reasons.push({
-      type: 'last_contacted',
-      description: 'Haven\'t connected yet',
-      weight: 25,
+      type: 'upcoming_event',
+      description: `Birthday in ${birthdayBonus.diffDays} day${birthdayBonus.diffDays === 1 ? '' : 's'}`,
+      weight,
     });
   }
 
@@ -70,11 +120,11 @@ const calculateConnectionScore = (
     
     if (daysUntilEvent <= 7 && daysUntilEvent >= 0) {
       let eventScore = 0;
-      if (event.type === 'birthday') eventScore = 35;
-      else if (event.type === 'anniversary') eventScore = 25;
-      else if (event.type === 'achievement') eventScore = 20;
-      else if (event.type === 'milestone') eventScore = 20;
-      else eventScore = 15;
+      if (event.type === 'birthday') eventScore = 40;
+      else if (event.type === 'anniversary') eventScore = 30;
+      else if (event.type === 'achievement') eventScore = 25;
+      else if (event.type === 'milestone') eventScore = 25;
+      else eventScore = 20;
       
       score += eventScore;
       reasons.push({
@@ -85,13 +135,67 @@ const calculateConnectionScore = (
     }
   });
 
-  // Add slight randomization (5-15 points) for balanced suggestions
-  const randomBonus = Math.floor(Math.random() * 10) + 5;
-  score += randomBonus;
+  return { score, reasons };
+};
+
+const calculateContactScore = (
+  contact: Contact,
+  upcomingEvents: any[],
+  currentDate: Date
+): { score: number; reasons: ConnectionReason[] } => {
+  const reasons: ConnectionReason[] = [];
+  const frequency = contact.contactFrequency ?? DEFAULT_CONTACT_FREQUENCY;
+  const priorityReasonWeight = FREQUENCY_PRIORITY[frequency];
+
   reasons.push({
-    type: 'random',
-    description: 'Balanced suggestion variety',
-    weight: randomBonus,
+    type: 'cadence_priority',
+    description: `Cadence: ${CONTACT_FREQUENCY_CONFIG[frequency].label}`,
+    weight: priorityReasonWeight,
+  });
+
+  const cadenceResult = computeCadenceScore(frequency, contact.lastContacted ?? undefined, currentDate);
+  reasons.push({
+    type: 'last_contacted',
+    description: cadenceResult.reason,
+    weight: Math.max(5, cadenceResult.score - priorityReasonWeight),
+  });
+
+  let score = cadenceResult.score + Math.random() * BASE_RANDOMNESS;
+
+  const birthdayBonus = computeBirthdayBonus(contact.birthday);
+  if (birthdayBonus && birthdayBonus.diffDays <= 30) {
+    const weight = birthdayBonus.diffDays <= 7 ? 50 : 30;
+    score += weight;
+    reasons.push({
+      type: 'upcoming_event',
+      description: `Birthday in ${birthdayBonus.diffDays} day${birthdayBonus.diffDays === 1 ? '' : 's'}`,
+      weight,
+    });
+  }
+
+  // Check for events matching this contact
+  const friendEvents = upcomingEvents.filter((event: any) =>
+    event.title && event.title.toLowerCase().includes(contact.firstName.toLowerCase())
+  );
+
+  friendEvents.forEach((event: any) => {
+    const eventDate = new Date(event.date);
+    const daysUntilEvent = Math.floor((eventDate.getTime() - currentDate.getTime()) / (1000 * 3600 * 24));
+    if (daysUntilEvent <= 7 && daysUntilEvent >= 0) {
+      let eventScore = 0;
+      if (event.type === 'birthday') eventScore = 40;
+      else if (event.type === 'anniversary') eventScore = 30;
+      else if (event.type === 'achievement') eventScore = 25;
+      else if (event.type === 'milestone') eventScore = 25;
+      else eventScore = 20;
+
+      score += eventScore;
+      reasons.push({ 
+        type: 'upcoming_event', 
+        description: `${event.title} in ${daysUntilEvent} day${daysUntilEvent !== 1 ? 's' : ''}`, 
+        weight: eventScore 
+      });
+    }
   });
 
   return { score, reasons };
@@ -131,9 +235,9 @@ export const connectionsApi = createApi({
 
           // Calculate suggestions for each friend
           const currentDate = new Date();
-          const suggestions: ConnectionSuggestion[] = (friends || []).map(friend => {
+          const friendSuggestions: ConnectionSuggestion[] = (friends || []).map(friend => {
             const { score, reasons } = calculateConnectionScore(friend, events || [], currentDate);
-            
+
             return {
               id: `suggestion_${friend.id}_${Date.now()}`,
               friendId: friend.friendId,
@@ -144,6 +248,34 @@ export const connectionsApi = createApi({
               dismissed: false,
             };
           });
+
+          // Load local contacts and create suggestions
+          const localContacts: Contact[] = await loadContacts();
+          const contactSuggestions: ConnectionSuggestion[] = (localContacts || []).map(contact => {
+            const { score, reasons } = calculateContactScore(contact, events || [], currentDate);
+            const fakeUser: User = {
+              id: contact.id,
+              email: '',
+              username: (contact.firstName + (contact.lastName ? contact.lastName[0] : '')).toLowerCase(),
+              firstName: contact.firstName,
+              lastName: contact.lastName || '',
+              profileImage: contact.profileImage,
+              createdAt: contact.createdAt,
+              updatedAt: contact.createdAt,
+            };
+
+            return {
+              id: `suggestion_contact_${contact.id}_${Date.now()}`,
+              friendId: contact.id,
+              friend: fakeUser,
+              score,
+              reasons,
+              suggestedAt: currentDate.toISOString(),
+              dismissed: false,
+            };
+          });
+
+          const suggestions = [...friendSuggestions, ...contactSuggestions];
 
           // Sort by score (highest first) and limit results
           const topSuggestions = suggestions

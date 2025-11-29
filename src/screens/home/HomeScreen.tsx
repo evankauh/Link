@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/screens/home/HomeScreen.tsx
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,320 +9,560 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  Modal,
+  Linking,
 } from 'react-native';
+import type { ViewStyle, TextStyle, ImageStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { useGetConnectionSuggestionsQuery, useDismissSuggestionMutation } from '../../store/api/connectionsApi';
-import { useUpdateLastContactedMutation } from '../../store/api/friendsApi';
-import { ConnectionSuggestion } from '../../types';
+import { colors, spacing, radius, layout, typography, shadow } from '../../styles/theme';
 
-// Mock user ID - in production, get this from auth context
-const MOCK_USER_ID = 'user-1';
+// --- Canonical types & storage utils ---
+import type { Contact, ContactFrequency } from '../../types';
+import { loadContacts, updateContact } from '../../utils/contactsStorage';
+import {
+  CONTACT_FREQUENCY_CONFIG,
+  DEFAULT_CONTACT_FREQUENCY,
+} from '../../constants/contactFrequency';
 
-export default function HomeScreen() {
-  const [refreshing, setRefreshing] = useState(false);
-  
-  const {
-    data: suggestions = [],
-    isLoading,
-    refetch
-  } = useGetConnectionSuggestionsQuery({ userId: MOCK_USER_ID });
-  
-  const [dismissSuggestion] = useDismissSuggestionMutation();
-  const [updateLastContacted] = useUpdateLastContactedMutation();
+// ---------- Minimal local types ----------
+type FrequencyKey = ContactFrequency;
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
+type User = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+  profileImage?: string;
+};
+
+type ConnectionReason =
+  | { type?: 'upcoming_event' | 'last_contact' | 'cadence'; description: string };
+
+type ConnectionSuggestion = {
+  id: string;
+  friendId: string;
+  friend: User;
+  score: number;
+  reasons: ConnectionReason[];
+  suggestedAt: string;
+  dismissed?: boolean;
+  meta?: {
+    lastContactedISO?: string | null;
+    frequency?: FrequencyKey;
   };
+};
 
-  const handleConnect = async (suggestion: ConnectionSuggestion) => {
-    Alert.alert(
-      'Connect with friend',
-      `Reach out to ${suggestion.friend.firstName}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Message',
-          onPress: () => {
-            // Here you would open messaging functionality
-            // For now, just update last contacted
-            updateLastContacted(suggestion.id);
-            Alert.alert('Great!', `You've connected with ${suggestion.friend.firstName}!`);
-          }
-        },
-      ]
+// ---------- Cadence weighting & cadence ----------
+const FREQUENCY_BASE_SCORE: Record<FrequencyKey, number> = {
+  biweekly: 60,
+  monthly: 48,
+  quarterly: 34,
+  semiannual: 24,
+};
+
+const FREQUENCY_URGENCY_MULTIPLIER: Record<FrequencyKey, number> = {
+  biweekly: 1.2,
+  monthly: 1.0,
+  quarterly: 0.7,
+  semiannual: 0.5,
+};
+
+// ---------- Helpers ----------
+const daysSince = (dateIso?: string | null) => {
+  if (!dateIso) return 999;
+  const t = new Date(dateIso).getTime();
+  const now = Date.now();
+  return Math.max(0, Math.floor((now - t) / (1000 * 60 * 60 * 24)));
+};
+
+const formatLastContacted = (iso?: string | null) => {
+  if (!iso) return 'Not recorded';
+  const d = daysSince(iso);
+  if (d === 0) return 'Today';
+  if (d === 1) return 'Yesterday';
+  return `${d} days ago`;
+};
+
+const fullName = (c: { firstName?: string; lastName?: string; username?: string }) =>
+  [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.username || 'Friend';
+
+const asUser = (c: Contact): User => ({
+  id: c.id,
+  firstName: c.firstName || '',
+  lastName: c.lastName || '',
+  username: (c.firstName || 'friend').toLowerCase(),
+  profileImage: c.profileImage,
+});
+
+// ===================================================================================
+/**
+ * useLocalConnectionSuggestions
+ * Computes suggestions entirely on-device from locally stored contacts.
+ * - Cadence weighting
+ * - Recency decay (lower chance if recently contacted)
+ * - Random jitter so it feels fresh
+ */
+// ===================================================================================
+function useLocalConnectionSuggestions() {
+  const [suggestions, setSuggestions] = useState<ConnectionSuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const scoreContact = useCallback((c: Contact) => {
+    const frequency = c.contactFrequency ?? DEFAULT_CONTACT_FREQUENCY;
+    const config = CONTACT_FREQUENCY_CONFIG[frequency];
+    const baseScore = FREQUENCY_BASE_SCORE[frequency];
+    const urgencyScale = FREQUENCY_URGENCY_MULTIPLIER[frequency];
+    const ds = daysSince(c.lastContacted);
+    const cadence = config.days;
+    const ratio = cadence ? ds / cadence : 0;
+
+    const approachingBoost = ratio < 1 ? ratio * 20 * urgencyScale : 0;
+    const overdueBoost = ratio >= 1 ? Math.min(ratio - 1, 2) * 35 * urgencyScale : 0;
+    const freshnessPenalty = ratio < 0.3 ? -10 * (1 - ratio / 0.3) : 0;
+    const jitter = Math.random() * 8;
+
+    return baseScore + approachingBoost + overdueBoost + freshnessPenalty + jitter;
+  }, []);
+
+  const compute = useCallback(async () => {
+    setLoading(true);
+    try {
+      const contacts: Contact[] = await loadContacts();
+      const enriched: ConnectionSuggestion[] = contacts.map((c) => {
+        const score = scoreContact(c);
+        const frequency = c.contactFrequency ?? DEFAULT_CONTACT_FREQUENCY;
+        return {
+          id: `local-${c.id}-${Math.random().toString(36).slice(2, 7)}`,
+          friendId: c.id,
+          friend: asUser(c),
+          score,
+          reasons: [
+            { type: 'cadence', description: `Cadence: ${CONTACT_FREQUENCY_CONFIG[frequency].label}` },
+            c.lastContacted
+              ? { description: `Last chatted ${daysSince(c.lastContacted)} days ago` }
+              : { description: 'No recent contact recorded' },
+          ],
+          suggestedAt: new Date().toISOString(),
+          meta: {
+            lastContactedISO: c.lastContacted ?? null,
+            frequency,
+          },
+        };
+      });
+
+      enriched.sort((a, b) => b.score - a.score);
+      setSuggestions(enriched.slice(0, 5));
+    } catch (e) {
+      console.error(e);
+      setSuggestions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [scoreContact]);
+
+  // initial load
+  useEffect(() => {
+    compute();
+  }, [compute]);
+
+  const generateNewSuggestion = useCallback(async () => {
+    // Recompute with fresh jitter/decay; produces a new top suggestion.
+    await compute();
+  }, [compute]);
+
+  const topSuggestion = useMemo(
+    () => (suggestions.length ? suggestions[0] : undefined),
+    [suggestions]
+  );
+
+  return {
+    loading,
+    suggestions,
+    topSuggestion,
+    refresh: compute,
+    generateNewSuggestion,
+  };
+}
+
+// ===================================================================================
+// HomeScreen
+// ===================================================================================
+const HomeScreen: React.FC = () => {
+  const {
+    loading,
+    topSuggestion,
+    refresh,
+    generateNewSuggestion,
+  } = useLocalConnectionSuggestions();
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [selected, setSelected] = useState<ConnectionSuggestion | undefined>();
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
+
+  const openSuggestionDetail = useCallback((s: ConnectionSuggestion) => {
+    setSelected(s);
+    setDetailVisible(true);
+  }, []);
+
+  const handleCallNow = useCallback(async () => {
+    if (!selected) return;
+    const contactId = selected.friendId;
+
+    try {
+      const contacts: Contact[] = await loadContacts();
+      const contact = contacts.find((c) => c.id === contactId);
+      if (!contact) {
+        Alert.alert('Contact not found');
+        return;
+      }
+      if (!contact.phone) {
+        Alert.alert('No phone number', `${fullName(contact)} has no phone on file.`);
+        return;
+      }
+
+      const phoneUrl = `tel:${contact.phone}`;
+      const supported = await Linking.canOpenURL(phoneUrl);
+
+      if (!supported) {
+        Alert.alert('Cannot start a call on this device');
+        return;
+      }
+
+      // ✅ Preserve existing createdAt; no casts, no mutation of createdAt
+      const nowIso = new Date().toISOString();
+      const updated: Contact = {
+        ...contact,
+        lastContacted: nowIso,
+        lastContactedCount: 'Today', // will also be normalized in storage for safety
+      };
+
+      await updateContact(updated);
+      await Linking.openURL(phoneUrl);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Something went wrong starting the call.');
+    } finally {
+      setDetailVisible(false);
+    }
+  }, [selected]);
+
+  // ---------- UI ----------
+  const renderTopWidget = () => {
+    if (!topSuggestion) return null;
+
+    const name = fullName(topSuggestion.friend);
+    const last = formatLastContacted(topSuggestion.meta?.lastContactedISO);
+
+    return (
+      <>
+        {/* Large rectangular, tappable image widget */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => openSuggestionDetail(topSuggestion)}
+          style={styles.heroImageWrapper}
+        >
+          <Image
+            source={{
+              uri:
+                topSuggestion.friend.profileImage ||
+                'https://via.placeholder.com/1200x600',
+            }}
+            style={styles.heroImage}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
+
+        {/* Contact info below the widget */}
+        <View style={styles.contactInfoBlock}>
+          <Text style={styles.contactName} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={styles.contactMeta}>Last contacted: {last}</Text>
+        </View>
+      </>
     );
   };
-
-  const handleDismiss = async (suggestionId: string) => {
-    await dismissSuggestion(suggestionId);
-  };
-
-  const renderSuggestion = (suggestion: ConnectionSuggestion) => (
-    <View key={suggestion.id} style={styles.suggestionCard}>
-      <View style={styles.suggestionHeader}>
-        <View style={styles.userInfo}>
-          <Image 
-            source={{ uri: suggestion.friend.profileImage || 'https://via.placeholder.com/50' }}
-            style={styles.profileImage}
-          />
-          <View style={styles.userDetails}>
-            <Text style={styles.userName}>
-              {suggestion.friend.firstName} {suggestion.friend.lastName}
-            </Text>
-            <Text style={styles.username}>@{suggestion.friend.username}</Text>
-          </View>
-        </View>
-        <Text style={styles.score}>{Math.round(suggestion.score)}</Text>
-      </View>
-
-      <View style={styles.reasonsContainer}>
-        {suggestion.reasons.slice(0, 2).map((reason, index) => (
-          <View key={index} style={styles.reasonChip}>
-            <Text style={styles.reasonText}>{reason.description}</Text>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.actionButtons}>
-        <TouchableOpacity 
-          style={[styles.button, styles.connectButton]}
-          onPress={() => handleConnect(suggestion)}
-        >
-          <Ionicons name="chatbubble-outline" size={16} color="white" />
-          <Text style={styles.connectButtonText}>Connect</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.button, styles.dismissButton]}
-          onPress={() => handleDismiss(suggestion.id)}
-        >
-          <Ionicons name="close-outline" size={16} color="#666" />
-          <Text style={styles.dismissButtonText}>Dismiss</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView
-        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing || loading} onRefresh={onRefresh} />
         }
       >
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.greeting}>Give this person a call!</Text>
-          <Text style={styles.subtitle}>It's been a while</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Suggested Connection</Text>
+          <TouchableOpacity onPress={refresh} style={styles.iconBtn}>
+            <Ionicons name="refresh" size={20} />
+          </TouchableOpacity>
         </View>
 
-        {/* Suggested Connections */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Suggested Links</Text>
-          
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <Text>Loading suggestions...</Text>
-            </View>
-          ) : suggestions.length > 0 ? (
-            <View style={styles.suggestionsContainer}>
-              {suggestions.map(renderSuggestion)}
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <Ionicons name="heart-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyStateText}>
-                No connection suggestions right now
-              </Text>
-              <Text style={styles.emptyStateSubtext}>
-                Add some friends to get personalized suggestions!
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActions}>
-            <TouchableOpacity style={styles.quickAction}>
-              <Ionicons name="people-outline" size={24} color="#007AFF" />
-              <Text style={styles.quickActionText}>Add Friends</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.quickAction}>
-              <Ionicons name="calendar-outline" size={24} color="#007AFF" />
-              <Text style={styles.quickActionText}>Add Event</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.quickAction}>
-              <Ionicons name="ticket-outline" size={24} color="#007AFF" />
-              <Text style={styles.quickActionText}>Plan Trip</Text>
+        {/* Top suggested friend widget */}
+        {topSuggestion ? (
+          renderTopWidget()
+        ) : (
+          <View style={styles.emptyState}>
+            <Ionicons name="people-circle-outline" size={36} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>No suggestions yet</Text>
+            <Text style={styles.emptySubtitle}>
+              Add contacts and set their cadences to get started.
+            </Text>
+            <TouchableOpacity onPress={refresh} style={styles.primaryBtn}>
+              <Text style={styles.primaryBtnText}>Refresh</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        )}
+
+        {/* NOTE: "More suggestions" section removed per requirements */}
       </ScrollView>
+
+      {/* Detail modal */}
+      <Modal
+        visible={detailVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDetailVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            {selected && (
+              <>
+                <Image
+                  source={{
+                    uri:
+                      selected.friend.profileImage ||
+                      'https://via.placeholder.com/160',
+                  }}
+                  style={styles.modalImage}
+                />
+                <Text style={styles.modalName}>
+                  {fullName(selected.friend)}
+                </Text>
+                {!!selected.reasons?.length && (
+                  <Text style={styles.modalReasons}>
+                    {selected.reasons.map((r) => r.description).join(' • ')}
+                  </Text>
+                )}
+
+                {/* Call Now */}
+                <TouchableOpacity style={styles.primaryBtn} onPress={handleCallNow}>
+                  <Ionicons name="call" size={18} color={colors.surface} />
+                  <Text style={styles.primaryBtnText}>Call Now</Text>
+                </TouchableOpacity>
+
+                {/* Generate New Suggestion */}
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={async () => {
+                    await generateNewSuggestion();
+                    setDetailVisible(false);
+                  }}
+                >
+                  <Ionicons name="shuffle" size={18} color={colors.primary} />
+                  <Text style={styles.secondaryBtnText}>Generate New Suggestion</Text>
+                </TouchableOpacity>
+
+                {/* Dismiss */}
+                <TouchableOpacity
+                  style={styles.dismissBtn}
+                  onPress={() => setDetailVisible(false)}
+                >
+                  <Text style={styles.dismissBtnText}>Dismiss</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
-}
+};
 
-const styles = StyleSheet.create({
+export default HomeScreen;
+
+// ---------- Styles ----------
+const HERO_ASPECT_RATIO = 9 / 12;
+
+type Styles = {
+  container: ViewStyle;
+  scrollContent: ViewStyle;
+  headerRow: ViewStyle;
+  headerTitle: TextStyle;
+  iconBtn: ViewStyle;
+  heroImageWrapper: ViewStyle;
+  heroImage: ImageStyle;
+  contactInfoBlock: ViewStyle;
+  contactName: TextStyle;
+  contactMeta: TextStyle;
+  emptyState: ViewStyle;
+  emptyTitle: TextStyle;
+  emptySubtitle: TextStyle;
+  primaryBtn: ViewStyle;
+  primaryBtnText: TextStyle;
+  secondaryBtn: ViewStyle;
+  secondaryBtnText: TextStyle;
+  modalBackdrop: ViewStyle;
+  modalCard: ViewStyle;
+  modalImage: ImageStyle;
+  modalName: TextStyle;
+  modalReasons: TextStyle;
+  dismissBtn: ViewStyle;
+  dismissBtnText: TextStyle;
+};
+
+const styles = StyleSheet.create<Styles>({
   container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+    ...layout.surfaceScreen,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
-  header: {
-    padding: 20,
-    paddingBottom: 10,
+  headerRow: {
+    ...layout.rowBetween,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
   },
-  greeting: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
+  headerTitle: {
+    ...typography.heading,
+    fontWeight: '800',
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 4,
+  iconBtn: {
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceAlt,
   },
-  section: {
-    padding: 20,
-    paddingTop: 10,
+
+  // --- Large suggested friend widget ---
+  heroImageWrapper: {
+    width: '100%',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.surfaceMuted,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
+  heroImage: {
+    width: '100%',
+    height: undefined,
+    aspectRatio: HERO_ASPECT_RATIO, // rectangular
   },
-  suggestionsContainer: {
-    gap: 16,
+  contactInfoBlock: {
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
-  suggestionCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  contactName: {
+    ...typography.heading,
+    fontSize: 22,
+    fontWeight: '800',
   },
-  suggestionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  profileImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
-  },
-  userDetails: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  username: {
+  contactMeta: {
+    marginTop: spacing.xs,
+    color: colors.textSecondary,
     fontSize: 14,
-    color: '#666',
   },
-  score: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  reasonsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-  },
-  reasonChip: {
-    backgroundColor: '#e3f2fd',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  reasonText: {
-    fontSize: 12,
-    color: '#1976d2',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  button: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 8,
-  },
-  connectButton: {
-    backgroundColor: '#007AFF',
-  },
-  connectButtonText: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  dismissButton: {
-    backgroundColor: '#f5f5f5',
-  },
-  dismissButtonText: {
-    color: '#666',
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
+
+  // --- Empty state ---
   emptyState: {
+    padding: spacing.xl,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
-    padding: 40,
   },
-  emptyStateText: {
+  emptyTitle: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#666',
-    marginTop: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginTop: spacing.sm,
   },
-  emptyStateSubtext: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
+  emptySubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
     textAlign: 'center',
+    marginTop: spacing.xs,
   },
-  quickActions: {
+
+  // --- Buttons shared ---
+  primaryBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
     flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  quickAction: {
     alignItems: 'center',
-    padding: 16,
+    gap: spacing.sm,
+    alignSelf: 'center',
   },
-  quickActionText: {
-    fontSize: 12,
-    color: '#007AFF',
-    marginTop: 8,
+  primaryBtnText: {
+    ...typography.buttonPrimary,
+  },
+  secondaryBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  secondaryBtnText: {
+    ...typography.buttonSecondary,
+  },
+
+  // --- Modal ---
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl,
+    ...shadow.card,
+  },
+  modalImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignSelf: 'center',
+    backgroundColor: colors.placeholder,
+  },
+  modalName: {
+    textAlign: 'center',
+    ...typography.heading,
+    fontWeight: '800',
+    marginTop: spacing.md,
+  },
+  modalReasons: {
+    textAlign: 'center',
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  dismissBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    marginTop: spacing.sm,
+    alignSelf: 'center',
+  },
+  dismissBtnText: {
+    color: colors.textMuted,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

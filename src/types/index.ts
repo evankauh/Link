@@ -1,4 +1,5 @@
 // User and Profile Types
+// src/types/index.ts
 export interface User {
   id: string;
   email: string;
@@ -6,6 +7,7 @@ export interface User {
   firstName: string;
   lastName: string;
   profileImage?: string;
+  birthday?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -15,14 +17,31 @@ export interface Friend {
   userId: string;
   friendId: string;
   status: 'pending' | 'accepted' | 'blocked';
-  friendshipTier: FriendshipTier;
+  contactFrequency: ContactFrequency;
+  birthday?: string | null;
   lastContacted?: string;
+  lastContactedCount?: string;
   createdAt: string;
   updatedAt: string;
   friend: User;
 }
 
-export type FriendshipTier = 'best_friend' | 'close_friend' | 'good_friend' | 'acquaintance';
+// Local contact stored on-device for suggestion engine and quick creation
+export interface Contact {
+  id: string;
+  firstName: string;
+  lastName?: string;
+  phone?: string;
+  profileImage?: string; // local uri or remote url
+  contactFrequency: ContactFrequency;
+  birthday?: string | null;
+  lastContacted?: string | null; // ISO date string
+  lastContactedCount?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export type ContactFrequency = 'biweekly' | 'monthly' | 'quarterly' | 'semiannual';
 
 // Events and Milestones
 export interface Event {
@@ -32,6 +51,9 @@ export interface Event {
   date: string;
   type: EventType;
   userId: string;
+  contactId?: string | null;
+  friendId?: string | null;
+  friendshipId?: string | null;
   isRecurring?: boolean;
   reminderEnabled?: boolean;
 }
@@ -50,7 +72,7 @@ export interface ConnectionSuggestion {
 }
 
 export interface ConnectionReason {
-  type: 'upcoming_event' | 'last_contacted' | 'life_change' | 'tier_priority' | 'random';
+  type: 'upcoming_event' | 'last_contacted' | 'life_change' | 'cadence_priority' | 'random';
   description: string;
   weight: number;
 }
@@ -89,5 +111,5 @@ export type MainTabParamList = {
 export type FriendsStackParamList = {
   FriendsList: undefined;
   AddFriend: undefined;
-  FriendProfile: { friendId: string };
+  FriendProfile: { friendId: string; contactId?: never } | { contactId: string; friendId?: never };
 };

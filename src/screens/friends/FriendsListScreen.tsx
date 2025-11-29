@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,198 +7,269 @@ import {
   TouchableOpacity,
   Image,
   RefreshControl,
-  Alert,
 } from 'react-native';
+import type { ViewStyle, TextStyle, ImageStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { FriendsStackParamList } from '../../types';
 
-import { useGetFriendsQuery, useUpdateFriendshipTierMutation } from '../../store/api/friendsApi';
-import type { Friend, FriendshipTier } from '../../types';
+import { useGetFriendsQuery, useUpdateContactFrequencyMutation } from '../../store/api/friendsApi';
+import type { Friend, Contact, ContactFrequency } from '../../types';
+import { loadContacts } from '../../utils/contactsStorage';
+import {
+  CONTACT_FREQUENCY_CONFIG,
+  CONTACT_FREQUENCY_ORDER,
+} from '../../constants/contactFrequency';
+import { colors, spacing, radius, typography, layout, components } from '../../styles/theme';
 
-// Mock user ID - in production, get this from auth context
 const MOCK_USER_ID = 'user-1';
-
-const TIER_COLORS: Record<FriendshipTier, string> = {
-  best_friend: '#ff4757',
-  close_friend: '#ffa502',
-  good_friend: '#2ed573',
-  acquaintance: '#747d8c',
-};
-
-const TIER_LABELS: Record<FriendshipTier, string> = {
-  best_friend: 'Best Friend',
-  close_friend: 'Close Friend',
-  good_friend: 'Good Friend',
-  acquaintance: 'Acquaintance',
-};
 
 export default function FriendsListScreen() {
   const navigation = useNavigation<StackNavigationProp<FriendsStackParamList, 'FriendsList'>>();
   const [refreshing, setRefreshing] = useState(false);
-  
+  const [contacts, setContacts] = useState<Contact[]>([]);
+
   const {
     data: friends = [],
     isLoading,
     refetch
   } = useGetFriendsQuery({ userId: MOCK_USER_ID });
-  
-  const [updateFriendshipTier] = useUpdateFriendshipTierMutation();
+  const [updateContactFrequency] = useUpdateContactFrequencyMutation();
+
+  const sortByName = (a: Contact, b: Contact) => {
+    const lnA = (a.lastName || '').toLowerCase();
+    const lnB = (b.lastName || '').toLowerCase();
+    if (lnA !== lnB) return lnA.localeCompare(lnB);
+    const fnA = (a.firstName || '').toLowerCase();
+    const fnB = (b.firstName || '').toLowerCase();
+    if (fnA !== fnB) return fnA.localeCompare(fnB);
+    return (a.id || '').localeCompare(b.id || '');
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), loadContactsFromStorage()]);
     setRefreshing(false);
   };
 
-  const handleTierChange = (friend: Friend) => {
-    const tierOptions = Object.keys(TIER_LABELS) as FriendshipTier[];
-    
-    Alert.alert(
-      'Update Friendship Tier',
-      `Change ${friend.friend.firstName}'s friendship tier:`,
+  const loadContactsFromStorage = async () => {
+    const loaded = await loadContacts();
+    setContacts([...loaded].sort(sortByName)); // storage already sorts; this is a safe guard
+  };
+
+  useEffect(() => {
+    loadContactsFromStorage();
+  }, []);
+
+  const handleFrequencyChange = (friend: Friend) => {
+    alertOptions(
+      'Update Contact Cadence',
+      `How often would you like to connect with ${friend.friend.firstName}?`,
       [
-        ...tierOptions.map(tier => ({
-          text: TIER_LABELS[tier],
-          onPress: () => updateFriendshipTier({ 
-            friendshipId: friend.id, 
-            tier 
-          }),
+        ...CONTACT_FREQUENCY_ORDER.map(freq => ({
+          text: CONTACT_FREQUENCY_CONFIG[freq].label,
+          onPress: () => updateContactFrequency({ friendshipId: friend.id, contactFrequency: freq }),
         })),
         { text: 'Cancel', style: 'cancel' },
-      ]
+      ],
     );
   };
 
-  const getLastContactedText = (lastContacted?: string) => {
-    if (!lastContacted) return 'Never';
-    
-    const date = new Date(lastContacted);
-    const now = new Date();
-    const diffInDays = Math.floor(
-      (now.getTime() - date.getTime()) / (1000 * 3600 * 24)
-    );
-    
-    if (diffInDays === 0) return 'Today';
-    if (diffInDays === 1) return 'Yesterday';
-    if (diffInDays < 7) return `${diffInDays} days ago`;
-    if (diffInDays < 30) return `${Math.floor(diffInDays / 7)} weeks ago`;
-    return `${Math.floor(diffInDays / 30)} months ago`;
+  const alertOptions = (
+    title: string,
+    message: string,
+    buttons: { text: string; style?: 'cancel' | 'destructive' | 'default'; onPress?: () => void }[]
+  ) => {
+    // Small wrapper to keep the code tidy here
+    // eslint-disable-next-line no-alert
+    // @ts-ignore react-native's Alert API type
+    import('react-native').then(({ Alert }) => Alert.alert(title, message, buttons));
+  };
+
+  const getLastContactedText = (contact?: Contact) => {
+    // Prefer the derived field from storage; fallback to a quick formatter
+    if (contact?.lastContactedCount) return contact.lastContactedCount;
+    if (!contact?.lastContacted) return '—';
+    const d = Math.floor((Date.now() - new Date(contact.lastContacted).getTime()) / (1000 * 60 * 60 * 24));
+    if (d <= 0) return 'Today';
+    if (d === 1) return 'Yesterday';
+    if (d < 30) return `${d} days ago`;
+    const months = Math.floor(d / 30);
+    if (months < 12) return months === 1 ? '1 month ago' : `${months} months ago`;
+    const years = Math.floor(months / 12);
+    return years === 1 ? '1 year ago' : `${years} years ago`;
+  };
+
+  const formatBirthday = (iso?: string | null) => {
+    if (!iso) return '—';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
   const renderFriend = ({ item: friend }: { item: Friend }) => (
     <TouchableOpacity
-      style={styles.friendCard}
+      style={styles.rowCard}
       onPress={() => navigation.navigate('FriendProfile', { friendId: friend.friendId })}
+      onLongPress={() => handleFrequencyChange(friend)}
+      activeOpacity={0.8}
     >
-      <View style={styles.friendInfo}>
-        <Image 
+      <View style={styles.rowContent}>
+        <Image
           source={{ uri: friend.friend.profileImage || 'https://via.placeholder.com/60' }}
-          style={styles.profileImage}
+          style={styles.avatar}
         />
-        
-        <View style={styles.friendDetails}>
-          <Text style={styles.friendName}>
+        <View style={styles.textCol}>
+          <Text style={styles.name}>
             {friend.friend.firstName} {friend.friend.lastName}
           </Text>
           <Text style={styles.username}>@{friend.friend.username}</Text>
-          
-          <View style={styles.metaInfo}>
-            <TouchableOpacity 
-              style={[styles.tierBadge, { backgroundColor: TIER_COLORS[friend.friendshipTier] }]}
-              onPress={() => handleTierChange(friend)}
+          <View style={styles.metaRow}>
+            <TouchableOpacity
+              onPress={() => handleFrequencyChange(friend)}
+              style={[
+                styles.cadenceBadge,
+                { backgroundColor: CONTACT_FREQUENCY_CONFIG[friend.contactFrequency].color },
+              ]}
+              activeOpacity={0.8}
+              accessibilityLabel={`Preferred cadence: ${CONTACT_FREQUENCY_CONFIG[friend.contactFrequency].label}`}
             >
-              <Text style={styles.tierText}>{TIER_LABELS[friend.friendshipTier]}</Text>
+              <Text style={styles.cadenceText}>
+                {CONTACT_FREQUENCY_CONFIG[friend.contactFrequency].shortLabel}
+              </Text>
             </TouchableOpacity>
-            
-            <Text style={styles.lastContacted}>
-              Last: {getLastContactedText(friend.lastContacted)}
+            <Text style={styles.metaDim}>
+              Last: {getLastContactedText({ lastContacted: friend.lastContacted } as any)}
+            </Text>
+            <Text style={styles.metaDim}>
+              Birthday: {formatBirthday(friend.birthday ?? friend.friend?.birthday)}
             </Text>
           </View>
         </View>
       </View>
-      
-      <Ionicons name="chevron-forward" size={20} color="#ccc" />
+      <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
     </TouchableOpacity>
   );
 
-  const renderSectionHeader = (title: string, count: number) => (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.sectionCount}>{count}</Text>
-    </View>
-  );
+  const renderContact = (c: Contact) => {
+    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unnamed';
+    return (
+      <TouchableOpacity
+        style={styles.rowCard}
+        onPress={() => navigation.navigate('FriendProfile', { contactId: c.id })} // open full-screen editor
+        activeOpacity={0.8}
+      >
+        <View style={styles.rowContent}>
+          <Image
+            source={{ uri: c.profileImage || 'https://via.placeholder.com/60' }}
+            style={styles.avatar}
+          />
+          <View style={styles.textCol}>
+            <Text style={styles.name}>{name}</Text>
+            <Text style={styles.username}>{c.phone || ''}</Text>
+            <View style={styles.metaRow}>
+              <View style={[styles.cadenceBadge, { backgroundColor: CONTACT_FREQUENCY_CONFIG[c.contactFrequency].color }]}>
+                <Text style={styles.cadenceText}>{CONTACT_FREQUENCY_CONFIG[c.contactFrequency].shortLabel}</Text>
+              </View>
+              <Text style={styles.metaDim}>Last: {getLastContactedText(c)}</Text>
+              <Text style={styles.metaDim}>Birthday: {formatBirthday(c.birthday)}</Text>
+            </View>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+      </TouchableOpacity>
+    );
+  };
 
-  // Group friends by tier
-  const friendsByTier = friends.reduce((acc, friend) => {
-    if (!acc[friend.friendshipTier]) {
-      acc[friend.friendshipTier] = [];
-    }
-    acc[friend.friendshipTier].push(friend);
+  const friendsByFrequency = friends.reduce((acc, friend) => {
+    (acc[friend.contactFrequency] ||= []).push(friend);
     return acc;
-  }, {} as Record<FriendshipTier, Friend[]>);
+  }, {} as Record<ContactFrequency, Friend[]>);
 
-  // Section item discriminated union for the FlatList
   type SectionItem =
-    | { type: 'header'; tier: FriendshipTier; count: number }
-    | { type: 'friend'; friend: Friend };
+    | { type: 'header'; title: string; count: number }
+    | { type: 'friend'; friend: Friend }
+    | { type: 'contact-header'; count: number }
+    | { type: 'contact'; contact: Contact };
 
-  // Flatten friends with section headers
-  const sectionsData: SectionItem[] = (Object.keys(TIER_LABELS) as FriendshipTier[])
-    .map(tier => ({
-      tier,
-      friends: friendsByTier[tier] || [],
-    }))
-    .filter(section => section.friends.length > 0)
-    .flatMap(section => [
-      { type: 'header', tier: section.tier, count: section.friends.length } as SectionItem,
-      ...section.friends.map(friend => ({ type: 'friend', friend } as SectionItem)),
-    ]);
+  const sectionsData: SectionItem[] = useMemo(() => {
+    const data: SectionItem[] = [];
+
+    if (contacts.length > 0) {
+      data.push({ type: 'contact-header', count: contacts.length });
+      contacts.forEach(c => data.push({ type: 'contact', contact: c }));
+    }
+
+    CONTACT_FREQUENCY_ORDER
+      .map(freq => ({ title: CONTACT_FREQUENCY_CONFIG[freq].label, list: friendsByFrequency[freq] || [] }))
+      .filter(section => section.list.length > 0)
+      .forEach(section => {
+        data.push({ type: 'header', title: section.title, count: section.list.length });
+        section.list.forEach(fr => data.push({ type: 'friend', friend: fr }));
+      });
+
+    return data;
+  }, [contacts, friends]);
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your Friends</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.addButton}
           onPress={() => navigation.navigate('AddFriend')}
         >
-          <Ionicons name="person-add" size={24} color="#007AFF" />
+          <Ionicons name="person-add" size={24} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
-      {isLoading && friends.length === 0 ? (
+      {isLoading && friends.length === 0 && contacts.length === 0 ? (
         <View style={styles.loadingContainer}>
           <Text>Loading friends...</Text>
         </View>
-      ) : friends.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="people-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyStateTitle}>No friends yet</Text>
-          <Text style={styles.emptyStateText}>
-            Start building your network by adding friends!
-          </Text>
-          <TouchableOpacity 
-            style={styles.addFriendButton}
+      ) : (friends.length === 0 && contacts.length === 0) ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="people-outline" size={64} color={colors.textMuted} />
+          <Text style={styles.emptyTitle}>No friends yet</Text>
+          <Text style={styles.emptyText}>Start building your network by adding friends!</Text>
+          <TouchableOpacity
+            style={styles.cta}
             onPress={() => navigation.navigate('AddFriend')}
           >
-            <Text style={styles.addFriendButtonText}>Add Your First Friend</Text>
+            <Text style={styles.ctaText}>Create Contact</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <FlatList
           data={sectionsData}
-          renderItem={({ item }: { item: SectionItem }) => {
+          keyExtractor={(item, idx) =>
+            item.type === 'contact-header' ? 'contact-header'
+              : item.type === 'contact' ? `contact-${item.contact.id}`
+              : item.type === 'header' ? `header-${item.title}`
+              : `friend-${item.friend.id}`
+          }
+          renderItem={({ item }) => {
+            if (item.type === 'contact-header') {
+              return (
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Local Contacts</Text>
+                  <Text style={styles.sectionCount}>{item.count}</Text>
+                </View>
+              );
+            }
+            if (item.type === 'contact') return renderContact(item.contact);
             if (item.type === 'header') {
-              return renderSectionHeader(TIER_LABELS[item.tier], item.count);
+              return (
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>{item.title}</Text>
+                  <Text style={styles.sectionCount}>{item.count}</Text>
+                </View>
+              );
             }
             return renderFriend({ item: item.friend });
           }}
-          keyExtractor={(item) =>
-            item.type === 'header' ? `header-${item.tier}` : `friend-${item.friend.id}`
-          }
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -209,134 +280,151 @@ export default function FriendsListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+type Styles = {
+  container: ViewStyle;
+  header: ViewStyle;
+  headerTitle: TextStyle;
+  addButton: ViewStyle;
+  sectionHeader: ViewStyle;
+  sectionTitle: TextStyle;
+  sectionCount: TextStyle;
+  listContainer: ViewStyle;
+  rowCard: ViewStyle;
+  rowContent: ViewStyle;
+  avatar: ImageStyle;
+  textCol: ViewStyle;
+  name: TextStyle;
+  username: TextStyle;
+  metaRow: ViewStyle;
+  cadenceBadge: ViewStyle;
+  cadenceText: TextStyle;
+  metaDim: TextStyle;
+  loadingContainer: ViewStyle;
+  emptyContainer: ViewStyle;
+  emptyTitle: TextStyle;
+  emptyText: TextStyle;
+  cta: ViewStyle;
+  ctaText: TextStyle;
+};
+
+const styles = StyleSheet.create<Styles>({
   container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+    ...layout.screen,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e1e5e9',
+    ...layout.rowBetween,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.surfaceBorder,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
+    ...typography.screenTitle,
   },
   addButton: {
-    padding: 8,
+    padding: spacing.sm,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: '#f8f9fa',
+    ...layout.rowBetween,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.background,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    ...typography.sectionTitle,
   },
   sectionCount: {
     fontSize: 16,
-    color: '#666',
+    color: colors.textSecondary,
   },
   listContainer: {
-    paddingBottom: 20,
+    paddingBottom: spacing.xxl,
   },
-  friendCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f3f4',
+  rowCard: {
+    ...layout.row,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.surfaceBorder,
   },
-  friendInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  rowContent: {
+    ...layout.row,
     flex: 1,
   },
-  profileImage: {
+  avatar: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    marginRight: 16,
+    marginRight: spacing.lg,
+    backgroundColor: colors.placeholder,
   },
-  friendDetails: {
+  textCol: {
     flex: 1,
   },
-  friendName: {
+  name: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
   },
   username: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
-  metaInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  metaRow: {
+    ...layout.row,
+    gap: spacing.md,
+    flexWrap: 'wrap',
   },
-  tierBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  cadenceBadge: {
+    ...components.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  tierText: {
+  cadenceText: {
     fontSize: 12,
-    color: 'white',
+    color: colors.surface,
     fontWeight: '600',
   },
-  lastContacted: {
+  metaDim: {
     fontSize: 12,
-    color: '#999',
+    color: colors.textMuted,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  emptyState: {
+  emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxxl,
+    paddingTop: spacing.xxxl + spacing.md,
   },
-  emptyStateTitle: {
+  emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#333',
-    marginTop: 20,
-    marginBottom: 8,
+    color: colors.textPrimary,
+    marginTop: spacing.xxl,
+    marginBottom: spacing.sm,
   },
-  emptyStateText: {
+  emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: colors.textSecondary,
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: spacing.xxxl,
   },
-  addFriendButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+  cta: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
   },
-  addFriendButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
+  ctaText: {
+    ...typography.buttonPrimary,
   },
 });

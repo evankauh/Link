@@ -1,3 +1,4 @@
+// src/screens/friends/AddFriendScreen.tsx
 import React, { useState } from 'react';
 import {
   View,
@@ -11,25 +12,31 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import type { ViewStyle, TextStyle, ImageStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useSearchUsersQuery, useAddFriendMutation } from '../../store/api/friendsApi';
-import type { User, FriendshipTier } from '../../types';
+import type { User, ContactFrequency } from '../../types';
+import {
+  CONTACT_FREQUENCY_CONFIG,
+  CONTACT_FREQUENCY_ORDER,
+  DEFAULT_CONTACT_FREQUENCY,
+} from '../../constants/contactFrequency';
+import { colors, spacing, radius, typography, layout, components } from '../../styles/theme';
 
 // Mock user ID - in production, get this from auth context
 const MOCK_USER_ID = 'user-1';
 
-const TIER_OPTIONS: { value: FriendshipTier; label: string; color: string }[] = [
-  { value: 'best_friend', label: 'Best Friend', color: '#ff4757' },
-  { value: 'close_friend', label: 'Close Friend', color: '#ffa502' },
-  { value: 'good_friend', label: 'Good Friend', color: '#2ed573' },
-  { value: 'acquaintance', label: 'Acquaintance', color: '#747d8c' },
-];
+const FREQUENCY_OPTIONS = CONTACT_FREQUENCY_ORDER.map(value => ({
+  value,
+  label: CONTACT_FREQUENCY_CONFIG[value].label,
+  color: CONTACT_FREQUENCY_CONFIG[value].color,
+}));
 
 export default function AddFriendScreen() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTier, setSelectedTier] = useState<FriendshipTier>('good_friend');
+  const [selectedFrequency, setSelectedFrequency] = useState<ContactFrequency>(DEFAULT_CONTACT_FREQUENCY);
   
   const {
     data: searchResults = [],
@@ -46,7 +53,7 @@ export default function AddFriendScreen() {
       await addFriend({
         userId: MOCK_USER_ID,
         friendId: user.id,
-        tier: selectedTier,
+        contactFrequency: selectedFrequency,
       }).unwrap();
       
       Alert.alert(
@@ -82,23 +89,23 @@ export default function AddFriendScreen() {
         onPress={() => handleAddFriend(user)}
         disabled={isAdding}
       >
-        <Ionicons name="person-add" size={20} color="#007AFF" />
+        <Ionicons name="person-add" size={20} color={colors.primary} />
       </TouchableOpacity>
     </View>
   );
 
-  const renderTierOption = (option: typeof TIER_OPTIONS[0]) => (
+  const renderFrequencyOption = (option: typeof FREQUENCY_OPTIONS[0]) => (
     <TouchableOpacity
       key={option.value}
       style={[
         styles.tierOption,
-        selectedTier === option.value && { backgroundColor: option.color },
+        selectedFrequency === option.value && { backgroundColor: option.color },
       ]}
-      onPress={() => setSelectedTier(option.value)}
+      onPress={() => setSelectedFrequency(option.value)}
     >
       <Text style={[
         styles.tierOptionText,
-        selectedTier === option.value && { color: 'white' },
+        selectedFrequency === option.value && { color: colors.surface },
       ]}>
         {option.label}
       </Text>
@@ -116,7 +123,7 @@ export default function AddFriendScreen() {
           <Text style={styles.sectionTitle}>Find Friends</Text>
           
           <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search by name or username..."
@@ -127,10 +134,10 @@ export default function AddFriendScreen() {
             />
           </View>
           
-          {/* Friendship Tier Selection */}
-          <Text style={styles.tierTitle}>Default Friendship Tier:</Text>
+          {/* Contact cadence selection */}
+          <Text style={styles.tierTitle}>Default contact cadence:</Text>
           <View style={styles.tierContainer}>
-            {TIER_OPTIONS.map(renderTierOption)}
+            {FREQUENCY_OPTIONS.map(renderFrequencyOption)}
           </View>
         </View>
 
@@ -138,7 +145,7 @@ export default function AddFriendScreen() {
         <View style={styles.resultsSection}>
           {searchTerm.length < 2 ? (
             <View style={styles.instructionsContainer}>
-              <Ionicons name="search-outline" size={48} color="#ccc" />
+              <Ionicons name="search-outline" size={48} color={colors.textMuted} />
               <Text style={styles.instructionsTitle}>Search for Friends</Text>
               <Text style={styles.instructionsText}>
                 Enter at least 2 characters to search for users by name or username
@@ -146,11 +153,11 @@ export default function AddFriendScreen() {
             </View>
           ) : isSearching || isFetching ? (
             <View style={styles.loadingContainer}>
-              <Text>Searching...</Text>
+              <Text style={typography.body}>Searching...</Text>
             </View>
           ) : searchResults.length === 0 ? (
             <View style={styles.emptyResults}>
-              <Ionicons name="person-outline" size={48} color="#ccc" />
+              <Ionicons name="person-outline" size={48} color={colors.textMuted} />
               <Text style={styles.emptyResultsText}>No users found</Text>
               <Text style={styles.emptyResultsSubtext}>
                 Try a different search term
@@ -171,66 +178,90 @@ export default function AddFriendScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+type Styles = {
+  container: ViewStyle;
+  content: ViewStyle;
+  searchSection: ViewStyle;
+  sectionTitle: TextStyle;
+  searchContainer: ViewStyle;
+  searchIcon: ViewStyle;
+  searchInput: TextStyle;
+  tierTitle: TextStyle;
+  tierContainer: ViewStyle;
+  tierOption: ViewStyle;
+  tierOptionText: TextStyle;
+  resultsSection: ViewStyle;
+  resultsList: ViewStyle;
+  userCard: ViewStyle;
+  profileImage: ImageStyle;
+  userInfo: ViewStyle;
+  userName: TextStyle;
+  username: TextStyle;
+  addButton: ViewStyle;
+  instructionsContainer: ViewStyle;
+  instructionsTitle: TextStyle;
+  instructionsText: TextStyle;
+  loadingContainer: ViewStyle;
+  emptyResults: ViewStyle;
+  emptyResultsText: TextStyle;
+  emptyResultsSubtext: TextStyle;
+};
+
+const styles = StyleSheet.create<Styles>({
   container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+    ...layout.screen,
   },
   content: {
     flex: 1,
   },
   searchSection: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e1e5e9',
+    backgroundColor: colors.surface,
+    padding: spacing.xl,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.surfaceBorder,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
+    ...typography.sectionTitle,
+    marginBottom: spacing.lg,
   },
   searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 20,
+    ...layout.row,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.xl,
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: spacing.sm,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#333',
+    color: colors.textPrimary,
   },
   tierTitle: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#333',
-    marginBottom: 12,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
   },
   tierContainer: {
-    flexDirection: 'row',
+    ...layout.row,
     flexWrap: 'wrap',
-    gap: 8,
+    gap: spacing.sm,
   },
   tierOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#f5f5f5',
+    ...components.chip,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colors.surfaceBorder,
   },
   tierOptionText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#666',
+    color: colors.textSecondary,
   },
   resultsSection: {
     flex: 1,
@@ -239,19 +270,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f3f4',
+    ...layout.row,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.surfaceBorder,
   },
   profileImage: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    marginRight: 16,
+    marginRight: spacing.lg,
   },
   userInfo: {
     flex: 1,
@@ -259,34 +289,34 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
   },
   username: {
     fontSize: 14,
-    color: '#666',
+    color: colors.textSecondary,
   },
   addButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#e3f2fd',
+    padding: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
   },
   instructionsContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    padding: spacing.xxxl,
   },
   instructionsTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-    marginBottom: 8,
+    color: colors.textPrimary,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
   instructionsText: {
     fontSize: 14,
-    color: '#666',
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -299,17 +329,17 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    padding: spacing.xxxl,
   },
   emptyResultsText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#666',
-    marginTop: 16,
+    color: colors.textSecondary,
+    marginTop: spacing.lg,
   },
   emptyResultsSubtext: {
     fontSize: 14,
-    color: '#999',
-    marginTop: 8,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
   },
 });
