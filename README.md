@@ -1,45 +1,60 @@
-# Link
+# Link (WORKING APP NAME)
 
 Stay connected to the people who matter.
 
-## Quick Start
+## Dev Setup
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 18+ ([download](https://nodejs.org/))
 - npm 9+
-- [Expo Go](https://expo.dev/client) app on your phone
+- Git
+- [Expo Go](https://expo.dev/client) app installed on your phone
 
-### Setup
+### Step 1: Clone the Repository
 
 ```bash
-# Install dependencies
+git clone https://github.com/yourusername/link.git
+cd link
+```
+
+### Step 2: Install Dependencies
+
+```bash
 npm install
-
-# Copy environment variables
-cp .env.example .env.local
-# Edit .env.local with your Supabase credentials
-
-# Start development server
-npm start
 ```
 
-Scan the QR code with Expo Go (Android) or Camera app (iOS) to view the app.
-
-### Running on Simulators
+### Step 3: Configure Environment Variables
 
 ```bash
-npm run ios      # iOS Simulator
-npm run android  # Android Emulator
+cp .env.example .env.local
 ```
 
-## Environment Variables
-
-Create `.env.local`:
+Edit `.env.local` with your Supabase credentials:
 
 ```env
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+### Step 4: Start the Development Server
+
+```bash
+npm start
+```
+
+### Step 5: View the App
+
+**On Physical Device:**
+
+1. Open Expo Go app on your phone (download from app store)
+2. Scan the QR code displayed in the terminal
+
+**On Simulator:**
+
+```bash
+npm run ios      # iOS Simulator (requires Xcode)
+npm run android  # Android Emulator (requires Android Studio)
 ```
 
 ## Scripts
