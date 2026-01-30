@@ -5,9 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function EventsScreen() {
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
-        <Text style={styles.title}>Events & Trips</Text>
         <Text style={styles.subtitle}>Trip planning and event discovery coming soon</Text>
       </View>
     </SafeAreaView>

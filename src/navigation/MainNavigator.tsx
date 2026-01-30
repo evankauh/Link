@@ -54,30 +54,29 @@ export default function MainNavigator() {
       <Tab.Screen 
         name="Home" 
         component={HomeScreen} 
-        options={{ title: 'Link' }}
+        options={{ headerShown: false }}
       />
       <Tab.Screen 
         name="Calendar" 
         component={CalendarScreen}
-        options={{ title: 'Calendar' }}
+        options={{ headerShown: false }}
       />
       <Tab.Screen 
         name="Friends" 
         component={FriendsNavigator}
         options={{ 
-          title: 'Friends',
           headerShown: false // Let the nested navigator handle headers
         }}
       />
       <Tab.Screen 
         name="Events" 
         component={EventsScreen}
-        options={{ title: 'Events' }}
+        options={{ headerShown: false }}
       />
       <Tab.Screen 
         name="Settings" 
         component={SettingsScreen}
-        options={{ title: 'Settings' }}
+        options={{ headerShown: false }}
       />
     </Tab.Navigator>
   );

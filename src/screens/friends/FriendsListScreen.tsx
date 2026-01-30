@@ -214,7 +214,7 @@ export default function FriendsListScreen() {
   }, [contacts, friends]);
 
   return (
-    <SafeAreaView style={styles.container} edges={[]}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your Friends</Text>
         <TouchableOpacity
@@ -314,10 +314,9 @@ const styles = StyleSheet.create<Styles>({
   header: {
     ...layout.rowBetween,
     paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
     backgroundColor: colors.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.surfaceBorder,
   },
   headerTitle: {
     ...typography.screenTitle,

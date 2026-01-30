@@ -7,7 +7,6 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <View style={styles.content}>
-        <Text style={styles.title}>Settings</Text>
         <Text style={styles.subtitle}>User preferences and app settings</Text>
       </View>
     </SafeAreaView>

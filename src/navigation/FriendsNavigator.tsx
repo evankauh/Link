@@ -27,7 +27,7 @@ export default function FriendsNavigator() {
       <Stack.Screen 
         name="FriendsList" 
         component={FriendsListScreen}
-        options={{ title: 'Friends' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen 
         name="AddFriend" 

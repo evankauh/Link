@@ -500,7 +500,6 @@ const CalendarScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.screenTitle}>Calendar</Text>
         {renderViewToggle()}
 
         {isLoadingFriends && isFetchingEvents ? (
@@ -715,7 +714,6 @@ export default CalendarScreen;
 type Styles = {
   container: ViewStyle;
   scrollContent: ViewStyle;
-  screenTitle: TextStyle;
   toggleRow: ViewStyle;
   toggleBtn: ViewStyle;
   toggleBtnActive: ViewStyle;
@@ -784,12 +782,8 @@ const styles = StyleSheet.create<Styles>({
   },
   scrollContent: {
     paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
     paddingBottom: spacing.xxxl,
-  },
-  screenTitle: {
-    ...typography.screenTitle,
-    marginTop: spacing.xl,
-    marginBottom: spacing.md,
   },
   toggleRow: {
     ...layout.row,
