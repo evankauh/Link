@@ -6,8 +6,7 @@ Stay connected to the people who matter.
 
 ### Prerequisites
 
-- Node.js 18+ ([download](https://nodejs.org/))
-- npm 9+
+- [nvm](https://github.com/nvm-sh/nvm) (Node Version Manager)
 - Git
 - [Expo Go](https://expo.dev/client) app installed on your phone
 
@@ -18,32 +17,41 @@ git clone https://github.com/yourusername/link.git
 cd link
 ```
 
-### Step 2: Install Dependencies
+### Step 2: Set Node Version
+
+```bash
+nvm install
+nvm use
+```
+
+This uses the version specified in `.nvmrc` (Node 18).
+
+### Step 3: Install Dependencies
 
 ```bash
 npm install
 ```
 
-### Step 3: Configure Environment Variables
+### Step 4: Configure Environment Variables
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-Edit `.env.local` with your Supabase credentials:
+Edit `.env` with your Supabase credentials:
 
 ```env
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### Step 4: Start the Development Server
+### Step 5: Start the Development Server
 
 ```bash
 npm start
 ```
 
-### Step 5: View the App
+### Step 6: View the App
 
 **On Physical Device:**
 
