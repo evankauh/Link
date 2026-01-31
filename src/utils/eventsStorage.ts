@@ -39,11 +39,13 @@ export async function saveEvents(userId: string, events: Event[]): Promise<void>
 export async function addEvent(userId: string, event: Event): Promise<Event> {
   const store = await readStore();
   const list = store[userId] ?? [];
+  // Generate ID if missing or empty string
   const id =
-    event.id ??
-    (globalThis.crypto?.randomUUID
-      ? globalThis.crypto.randomUUID()
-      : `evt_${Math.random().toString(36).slice(2, 10)}`);
+    event.id && event.id.length > 0
+      ? event.id
+      : (globalThis.crypto?.randomUUID
+          ? globalThis.crypto.randomUUID()
+          : `evt_${Math.random().toString(36).slice(2, 10)}`);
   const withId: Event = { ...event, id };
   store[userId] = [withId, ...list];
   await writeStore(store);

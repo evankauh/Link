@@ -41,7 +41,7 @@ export interface Contact {
   createdAt: string;
 }
 
-export type ContactFrequency = 'biweekly' | 'monthly' | 'quarterly' | 'semiannual';
+export type ContactFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'biannual' | 'annually';
 
 // Events and Milestones
 export interface Event {

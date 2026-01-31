@@ -35,7 +35,7 @@ describe('contactsStorage', () => {
 
   it('addContact prepends and persists', async () => {
     const existing: Contact[] = [
-      { id: 'a', firstName: 'Bob', createdAt: new Date().toISOString(), contactFrequency: 'semiannual' },
+      { id: 'a', firstName: 'Bob', createdAt: new Date().toISOString(), contactFrequency: 'biannual' },
     ];
     mockedStorage.getItem.mockResolvedValueOnce(JSON.stringify(existing));
 

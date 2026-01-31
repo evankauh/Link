@@ -8,6 +8,7 @@ import AddFriendScreen from '../screens/friends/AddFriendScreen';
 import FriendProfileScreen from '../screens/friends/FriendProfileScreen';
 
 import type { FriendsStackParamList } from '../types';
+import { colors } from '../styles/theme';
 
 const Stack = createStackNavigator<FriendsStackParamList>();
 
@@ -16,12 +17,13 @@ export default function FriendsNavigator() {
     <Stack.Navigator
       screenOptions={{
         headerStyle: {
-          backgroundColor: '#f8f9fa',
+          backgroundColor: colors.background,
         },
         headerTitleStyle: {
           fontWeight: 'bold',
+          color: colors.textPrimary,
         },
-        headerTintColor: '#007AFF',
+        headerTintColor: colors.primary,
       }}
     >
       <Stack.Screen 
@@ -32,7 +34,10 @@ export default function FriendsNavigator() {
       <Stack.Screen 
         name="AddFriend" 
         component={AddFriendScreen}
-        options={{ title: 'Add Friend' }}
+        options={({ navigation }) => ({
+          headerTitle: 'Add Contact',
+          headerShown: false,
+        })}
       />
       <Stack.Screen 
         name="FriendProfile" 
@@ -49,7 +54,7 @@ export default function FriendsNavigator() {
                 accessibilityRole="button"
                 accessibilityLabel="Back to friends list"
               >
-                <Ionicons name="arrow-back" size={24} color="#007AFF" />
+                <Ionicons name="arrow-back" size={24} color={colors.primary} />
               </TouchableOpacity>
             ) : null
           ),

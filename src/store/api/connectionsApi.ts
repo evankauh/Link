@@ -9,10 +9,12 @@ import {
 } from '../../constants/contactFrequency';
 
 const FREQUENCY_PRIORITY: Record<ContactFrequency, number> = {
+  weekly: 80,
   biweekly: 65,
   monthly: 50,
   quarterly: 35,
-  semiannual: 25,
+  biannual: 25,
+  annually: 10,
 };
 
 const BASE_RANDOMNESS = 8;

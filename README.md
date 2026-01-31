@@ -17,22 +17,13 @@ git clone https://github.com/yourusername/link.git
 cd link
 ```
 
-### Step 2: Set Node Version
-
-```bash
-nvm install
-nvm use
-```
-
-This uses the version specified in `.nvmrc` (Node 18).
-
-### Step 3: Install Dependencies
+### Step 2: Install Dependencies
 
 ```bash
 npm install
 ```
 
-### Step 4: Configure Environment Variables
+### Step 3: Configure Environment Variables
 
 ```bash
 cp .env.example .env
@@ -45,13 +36,13 @@ EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### Step 5: Start the Development Server
+### Step 4: Start the Development Server
 
 ```bash
 npm start
 ```
 
-### Step 6: View the App
+### Step 5: View the App
 
 **On Physical Device:**
 
@@ -61,7 +52,7 @@ npm start
 **On Simulator:**
 
 ```bash
-npm run ios      # iOS Simulator (requires Xcode)
+npm run ios      # iOS Simulator (requires Xcode. you can also just press i after using npx expo start --clear)
 npm run android  # Android Emulator (requires Android Studio)
 ```
 

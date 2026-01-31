@@ -148,13 +148,16 @@ const CalendarScreen: React.FC = () => {
       isFriend?: boolean,
     ) => {
       if (!isoBirthday) return;
-      const baseDate = new Date(isoBirthday);
+      // Parse as local time to avoid timezone issues with YYYY-MM-DD dates
+      const baseDate = new Date(`${isoBirthday}T00:00:00`);
       if (Number.isNaN(baseDate.getTime())) return;
-      const month = baseDate.getUTCMonth();
-      const day = baseDate.getUTCDate();
+      const month = baseDate.getMonth();
+      const day = baseDate.getDate();
 
       [currentYear, nextYear].forEach(year => {
-        const occurrence = new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+        // Create date in local timezone to match the rest of the app
+        const occurrenceDate = new Date(year, month, day);
+        const occurrence = `${occurrenceDate.getFullYear()}-${String(occurrenceDate.getMonth() + 1).padStart(2, '0')}-${String(occurrenceDate.getDate()).padStart(2, '0')}`;
         occurrences.push({
           id: `birthday-${ownerId}-${year}`,
           title: `${displayName}'s Birthday`,
@@ -237,15 +240,18 @@ const CalendarScreen: React.FC = () => {
     const today = new Date();
     const computeDays = (iso?: string | null) => {
       if (!iso) return null;
-      const date = new Date(iso);
+      // Parse as local time to avoid timezone issues
+      const date = new Date(`${iso}T00:00:00`);
       if (Number.isNaN(date.getTime())) return null;
-      const currentYear = today.getUTCFullYear();
-      const nextOccurrence = new Date(Date.UTC(currentYear, date.getUTCMonth(), date.getUTCDate()));
-      if (nextOccurrence < new Date(today.toISOString().slice(0, 10))) {
-        nextOccurrence.setUTCFullYear(currentYear + 1);
+      const currentYear = today.getFullYear();
+      const nextOccurrence = new Date(currentYear, date.getMonth(), date.getDate());
+      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      if (nextOccurrence < todayMidnight) {
+        nextOccurrence.setFullYear(currentYear + 1);
       }
-      const diffDays = Math.ceil((nextOccurrence.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      return { diffDays, iso: nextOccurrence.toISOString().slice(0, 10) };
+      const diffDays = Math.ceil((nextOccurrence.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+      const isoResult = `${nextOccurrence.getFullYear()}-${String(nextOccurrence.getMonth() + 1).padStart(2, '0')}-${String(nextOccurrence.getDate()).padStart(2, '0')}`;
+      return { diffDays, iso: isoResult };
     };
 
     const entries: { name: string; inDays: number; iso: string }[] = [];
@@ -361,9 +367,20 @@ const CalendarScreen: React.FC = () => {
   };
 
   const formatDateHeading = (iso: string) => {
-    const date = new Date(iso);
+    const date = new Date(`${iso}T00:00:00`);
     if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    
+    const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+    const day = date.getDate();
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    
+    // Short months that don't need abbreviation: May, June, July
+    const shortMonths = [4, 5, 6]; // May (4), June (5), July (6)
+    const monthNames = ['Jan.', 'Feb.', 'March', 'April', 'May', 'June', 'July', 'Aug.', 'Sept.', 'Oct.', 'Nov.', 'Dec.'];
+    const monthName = monthNames[month];
+    
+    return `${weekday}, ${monthName} ${day}, ${year}`;
   };
 
   const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
@@ -513,11 +530,16 @@ const CalendarScreen: React.FC = () => {
             <Ionicons name="gift" size={20} color={colors.accent} style={styles.bannerIcon} />
             <View style={{ flex: 1 }}>
               <Text style={styles.bannerTitle}>Upcoming birthdays</Text>
-              {upcomingBirthdays.map(entry => (
-                <Text key={`${entry.name}-${entry.iso}`} style={styles.bannerText}>
-                  {entry.name} • in {entry.inDays} day{entry.inDays === 1 ? '' : 's'} ({new Date(entry.iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})
-                </Text>
-              ))}
+              {upcomingBirthdays.map(entry => {
+                const entryDate = new Date(`${entry.iso}T00:00:00`);
+                const monthStr = entryDate.toLocaleDateString('en-US', { month: 'short' });
+                const dayNum = entryDate.getDate();
+                return (
+                  <Text key={`${entry.name}-${entry.iso}`} style={styles.bannerText}>
+                    {entry.name} • in {entry.inDays} day{entry.inDays === 1 ? '' : 's'} ({monthStr} {dayNum})
+                  </Text>
+                );
+              })}
             </View>
           </View>
         )}
@@ -590,8 +612,13 @@ const CalendarScreen: React.FC = () => {
         transparent
         onRequestClose={() => setAddModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => { setAddModalVisible(false); resetForm(); }}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New event</Text>
               <TouchableOpacity onPress={() => { setAddModalVisible(false); resetForm(); }}>
@@ -631,8 +658,9 @@ const CalendarScreen: React.FC = () => {
                 <Text style={styles.modalPrimaryBtnText}>Save event</Text>
               )}
             </TouchableOpacity>
-          </View>
-        </View>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       <Modal
@@ -641,26 +669,32 @@ const CalendarScreen: React.FC = () => {
         animationType="fade"
         onRequestClose={() => setTypePickerVisible(false)}
       >
-        <View style={styles.sheetBackdrop}>
-          <View style={styles.sheetContainer}>
-            <Text style={styles.sheetTitle}>Select event type</Text>
-            {eventTypeOptions.map(option => {
-              const active = option.value === eventType;
-              return (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[styles.sheetRow, active && styles.sheetRowActive]}
-                  onPress={() => {
-                    setEventType(option.value);
-                    setTypePickerVisible(false);
-                  }}
-                >
-                  <Text style={[styles.sheetRowText, active && styles.sheetRowTextActive]}>{option.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
+        <TouchableOpacity
+          style={styles.sheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setTypePickerVisible(false)}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={styles.sheetContainer}>
+              <Text style={styles.sheetTitle}>Select event type</Text>
+              {eventTypeOptions.map(option => {
+                const active = option.value === eventType;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[styles.sheetRow, active && styles.sheetRowActive]}
+                    onPress={() => {
+                      setEventType(option.value);
+                      setTypePickerVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.sheetRowText, active && styles.sheetRowTextActive]}>{option.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       <Modal
@@ -669,41 +703,47 @@ const CalendarScreen: React.FC = () => {
         animationType="fade"
         onRequestClose={() => setContactPickerVisible(false)}
       >
-        <View style={styles.sheetBackdrop}>
-          <View style={styles.sheetContainer}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Link to contact</Text>
-              <TouchableOpacity onPress={() => setContactPickerVisible(false)}>
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              value={contactQuery}
-              onChangeText={setContactQuery}
-              placeholder="Search contacts"
-              style={styles.sheetSearch}
-            />
-            <FlatList
-              data={contactOptions}
-              keyExtractor={item => item.id}
-              renderItem={({ item }: { item: ContactOption }) => (
-                <TouchableOpacity
-                  style={[styles.sheetRow, linkedContactId === (item.id === 'none' ? null : item.id) && styles.sheetRowActive]}
-                  onPress={() => {
-                    setLinkedContactId(item.id === 'none' ? null : item.id);
-                    setContactQuery('');
-                    setContactPickerVisible(false);
-                  }}
-                >
-                  <Text style={[styles.sheetRowText, linkedContactId === (item.id === 'none' ? null : item.id) && styles.sheetRowTextActive]}>
-                    {item.label}
-                  </Text>
+        <TouchableOpacity
+          style={styles.sheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setContactPickerVisible(false)}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={styles.sheetContainer}>
+              <View style={styles.sheetHeader}>
+                <Text style={styles.sheetTitle}>Link to contact</Text>
+                <TouchableOpacity onPress={() => setContactPickerVisible(false)}>
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
-              )}
-              keyboardShouldPersistTaps="handled"
-            />
-          </View>
-        </View>
+              </View>
+              <TextInput
+                value={contactQuery}
+                onChangeText={setContactQuery}
+                placeholder="Search contacts"
+                style={styles.sheetSearch}
+              />
+              <FlatList
+                data={contactOptions}
+                keyExtractor={item => item.id}
+                renderItem={({ item }: { item: ContactOption }) => (
+                  <TouchableOpacity
+                    style={[styles.sheetRow, linkedContactId === (item.id === 'none' ? null : item.id) && styles.sheetRowActive]}
+                    onPress={() => {
+                      setLinkedContactId(item.id === 'none' ? null : item.id);
+                      setContactQuery('');
+                      setContactPickerVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.sheetRowText, linkedContactId === (item.id === 'none' ? null : item.id) && styles.sheetRowTextActive]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                keyboardShouldPersistTaps="handled"
+              />
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );

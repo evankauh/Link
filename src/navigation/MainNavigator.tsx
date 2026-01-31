@@ -1,83 +1,57 @@
 import React from 'react';
+import { View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
 
 import HomeScreen from '../screens/home/HomeScreen';
 import CalendarScreen from '../screens/calendar/CalendarScreen';
 import FriendsNavigator from './FriendsNavigator';
 import EventsScreen from '../screens/events/EventsScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import { FloatingTabBar } from '../components';
 
 import type { MainTabParamList } from '../types';
+import { colors } from '../styles/theme';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export default function MainNavigator() {
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap;
-
-          switch (route.name) {
-            case 'Home':
-              iconName = focused ? 'home' : 'home-outline';
-              break;
-            case 'Calendar':
-              iconName = focused ? 'calendar' : 'calendar-outline';
-              break;
-            case 'Friends':
-              iconName = focused ? 'people' : 'people-outline';
-              break;
-            case 'Events':
-              iconName = focused ? 'ticket' : 'ticket-outline';
-              break;
-            case 'Settings':
-              iconName = focused ? 'settings' : 'settings-outline';
-              break;
-            default:
-              iconName = 'home-outline';
-          }
-
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: 'gray',
-        headerStyle: {
-          backgroundColor: '#f8f9fa',
-        },
-        headerTitleStyle: {
-          fontWeight: 'bold',
-        },
-      })}
-    >
-      <Tab.Screen 
-        name="Home" 
-        component={HomeScreen} 
-        options={{ headerShown: false }}
-      />
-      <Tab.Screen 
-        name="Calendar" 
-        component={CalendarScreen}
-        options={{ headerShown: false }}
-      />
-      <Tab.Screen 
-        name="Friends" 
-        component={FriendsNavigator}
-        options={{ 
-          headerShown: false // Let the nested navigator handle headers
+    <View style={styles.container}>
+      <Tab.Navigator
+        tabBar={(props) => <FloatingTabBar {...props} />}
+        screenOptions={{
+          headerShown: false,
         }}
-      />
-      <Tab.Screen 
-        name="Events" 
-        component={EventsScreen}
-        options={{ headerShown: false }}
-      />
-      <Tab.Screen 
-        name="Settings" 
-        component={SettingsScreen}
-        options={{ headerShown: false }}
-      />
-    </Tab.Navigator>
+      >
+        {/* Order: Friends, Calendar, Home (center), Events, Settings */}
+        <Tab.Screen 
+          name="Friends" 
+          component={FriendsNavigator}
+        />
+        <Tab.Screen 
+          name="Calendar" 
+          component={CalendarScreen}
+        />
+        <Tab.Screen 
+          name="Home" 
+          component={HomeScreen}
+        />
+        <Tab.Screen 
+          name="Events" 
+          component={EventsScreen}
+        />
+        <Tab.Screen 
+          name="Settings" 
+          component={SettingsScreen}
+        />
+      </Tab.Navigator>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+});
