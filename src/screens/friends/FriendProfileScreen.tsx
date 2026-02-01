@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
   TouchableOpacity, Image, Alert, ActivityIndicator,
@@ -12,6 +12,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import type { StackNavigationProp } from '@react-navigation/stack';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import type { FriendsStackParamList, Contact, ContactFrequency, Event as CalendarEvent } from '../../types';
 import { loadContacts, updateContact, removeContact } from '../../utils/contactsStorage';
@@ -57,43 +58,29 @@ const formatBirthdayDetailed = (iso?: string | null) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-// Format YYYY-MM-DD to MM-DD-YYYY for display
-const formatBirthdayForInput = (iso?: string | null): string => {
-  if (!iso) return '';
-  const parts = iso.split('-');
-  if (parts.length !== 3) return '';
-  return `${parts[1]}-${parts[2]}-${parts[0]}`;
+// Parse YYYY-MM-DD to Date object
+const parseBirthdayToDate = (iso?: string | null): Date | null => {
+  if (!iso) return null;
+  const date = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
-// Format MM-DD-YYYY input as user types
-const formatBirthdayInput = (text: string): string => {
-  const digits = text.replace(/\D/g, '');
-  const limited = digits.slice(0, 8);
-  if (limited.length === 0) return '';
-  if (limited.length <= 2) return limited;
-  if (limited.length <= 4) return `${limited.slice(0, 2)}-${limited.slice(2)}`;
-  return `${limited.slice(0, 2)}-${limited.slice(2, 4)}-${limited.slice(4)}`;
+// Format Date to display string
+const formatBirthdayDisplay = (date: Date | null): string => {
+  if (!date) return '';
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 };
 
-// Validate MM-DD-YYYY format
-const isValidBirthdayInput = (formatted: string): boolean => {
-  if (formatted.length !== 10) return false;
-  const parts = formatted.split('-');
-  if (parts.length !== 3) return false;
-  const month = parseInt(parts[0], 10);
-  const day = parseInt(parts[1], 10);
-  const year = parseInt(parts[2], 10);
-  if (month < 1 || month > 12) return false;
-  if (day < 1 || day > 31) return false;
-  if (year < 1900 || year > new Date().getFullYear()) return false;
-  const date = new Date(year, month - 1, day);
-  return date.getMonth() === month - 1 && date.getDate() === day;
-};
-
-// Convert MM-DD-YYYY to YYYY-MM-DD for storage
-const convertToISODate = (formatted: string): string => {
-  const parts = formatted.split('-');
-  return `${parts[2]}-${parts[0]}-${parts[1]}`;
+// Convert Date to YYYY-MM-DD for storage
+const dateToISOString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const formatEventDate = (iso: string) => {
@@ -124,7 +111,8 @@ export default function FriendProfileScreen() {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [contactFrequency, setContactFrequency] = useState<ContactFrequency>(DEFAULT_CONTACT_FREQUENCY);
-  const [birthday, setBirthday] = useState('');
+  const [birthday, setBirthday] = useState<Date | null>(null);
+  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
   const [notes, setNotes] = useState('');
   const [profileImage, setProfileImage] = useState<string | undefined>(undefined);
 
@@ -134,7 +122,8 @@ export default function FriendProfileScreen() {
   // Event creation state
   const [showEventModal, setShowEventModal] = useState(false);
   const [eventTitle, setEventTitle] = useState('');
-  const [eventDate, setEventDate] = useState('');
+  const [eventDate, setEventDate] = useState<Date | null>(null);
+  const [showEventDatePicker, setShowEventDatePicker] = useState(false);
   const [eventType, setEventType] = useState<EventType>('milestone');
 
   const eventTypes: { value: EventType; label: string }[] = [
@@ -145,47 +134,38 @@ export default function FriendProfileScreen() {
     { value: 'custom', label: 'Custom' },
   ];
 
-  const formatEventDateInput = (text: string): string => {
-    const digits = text.replace(/\D/g, '');
-    const limited = digits.slice(0, 8);
-    if (limited.length === 0) return '';
-    if (limited.length <= 2) return limited;
-    if (limited.length <= 4) return `${limited.slice(0, 2)}-${limited.slice(2)}`;
-    return `${limited.slice(0, 2)}-${limited.slice(2, 4)}-${limited.slice(4)}`;
-  };
+  const handleBirthdayChange = useCallback((event: any, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowBirthdayPicker(false);
+    }
+    if (date) {
+      setBirthday(date);
+    }
+  }, []);
 
-  const isValidEventDate = (formatted: string): boolean => {
-    if (formatted.length !== 10) return false;
-    const parts = formatted.split('-');
-    if (parts.length !== 3) return false;
-    const month = parseInt(parts[0], 10);
-    const day = parseInt(parts[1], 10);
-    const year = parseInt(parts[2], 10);
-    if (month < 1 || month > 12) return false;
-    if (day < 1 || day > 31) return false;
-    if (year < 1900 || year > 2100) return false;
-    return true;
-  };
-
-  const convertEventDateToISO = (formatted: string): string => {
-    const parts = formatted.split('-');
-    return `${parts[2]}-${parts[0]}-${parts[1]}`;
-  };
+  const handleEventDateChange = useCallback((event: any, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowEventDatePicker(false);
+    }
+    if (date) {
+      setEventDate(date);
+    }
+  }, []);
 
   const handleCreateEvent = async () => {
     if (!eventTitle.trim()) {
       Alert.alert('Missing title', 'Please enter an event title.');
       return;
     }
-    if (!isValidEventDate(eventDate)) {
-      Alert.alert('Invalid date', 'Please enter a valid date in MM-DD-YYYY format.');
+    if (!eventDate) {
+      Alert.alert('Missing date', 'Please select a date for the event.');
       return;
     }
 
     try {
       await createEvent({
         title: eventTitle.trim(),
-        date: convertEventDateToISO(eventDate),
+        date: dateToISOString(eventDate),
         type: eventType,
         userId: MOCK_USER_ID,
         contactId: contact?.id,
@@ -193,7 +173,7 @@ export default function FriendProfileScreen() {
       }).unwrap();
 
       setEventTitle('');
-      setEventDate('');
+      setEventDate(null);
       setEventType('milestone');
       setShowEventModal(false);
       refetchEvents();
@@ -215,7 +195,7 @@ export default function FriendProfileScreen() {
         setLastName(c.lastName || '');
         setPhone(c.phone || '');
         setContactFrequency(c.contactFrequency ?? DEFAULT_CONTACT_FREQUENCY);
-        setBirthday(formatBirthdayForInput(c.birthday));
+        setBirthday(parseBirthdayToDate(c.birthday));
         setNotes(c.notes || '');
         setProfileImage(c.profileImage);
       }
@@ -273,15 +253,7 @@ export default function FriendProfileScreen() {
       return;
     }
 
-    const normalizedBirthdayInput = birthday.trim() ? birthday.trim() : null;
-    let normalizedBirthday: string | null = null;
-    if (normalizedBirthdayInput) {
-      if (!isValidBirthdayInput(normalizedBirthdayInput)) {
-        Alert.alert('Invalid birthday', 'Please enter a valid date in MM-DD-YYYY format.');
-        return;
-      }
-      normalizedBirthday = convertToISODate(normalizedBirthdayInput);
-    }
+    const normalizedBirthday: string | null = birthday ? dateToISOString(birthday) : null;
 
     const updated: Contact = {
       ...contact,
@@ -295,7 +267,6 @@ export default function FriendProfileScreen() {
     };
     await updateContact(updated);
     setContact(updated);
-    setBirthday(formatBirthdayForInput(normalizedBirthday));
     Alert.alert('Saved', 'Contact updated successfully.');
   };
 
@@ -463,15 +434,37 @@ export default function FriendProfileScreen() {
 
             {/* Birthday */}
             <Text style={styles.label}>Birthday</Text>
-            <TextInput
-              value={birthday}
-              onChangeText={(text) => setBirthday(formatBirthdayInput(text))}
-              placeholder="MM-DD-YYYY"
-              placeholderTextColor={colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={10}
-              style={styles.input}
-            />
+            <TouchableOpacity
+              style={styles.datePickerButton}
+              onPress={() => setShowBirthdayPicker(true)}
+            >
+              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+              <Text style={birthday ? styles.datePickerText : styles.datePickerPlaceholder}>
+                {birthday ? formatBirthdayDisplay(birthday) : 'Select birthday'}
+              </Text>
+            </TouchableOpacity>
+            {showBirthdayPicker && (
+              <View style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <Text style={styles.datePickerTitle}>Select Birthday</Text>
+                  <TouchableOpacity 
+                    onPress={() => setShowBirthdayPicker(false)}
+                    style={styles.datePickerDone}
+                  >
+                    <Text style={styles.datePickerDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={birthday || new Date(2000, 0, 1)}
+                  mode="date"
+                  display="spinner"
+                  onChange={handleBirthdayChange}
+                  maximumDate={new Date()}
+                  minimumDate={new Date(1900, 0, 1)}
+                  style={styles.datePicker}
+                />
+              </View>
+            )}
 
             {/* Cadence */}
             <Text style={styles.label}>Preferred Cadence</Text>
@@ -586,15 +579,37 @@ export default function FriendProfileScreen() {
             />
 
             <Text style={styles.label}>Date</Text>
-            <TextInput
-              value={eventDate}
-              onChangeText={(text) => setEventDate(formatEventDateInput(text))}
-              placeholder="MM-DD-YYYY"
-              placeholderTextColor={colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={10}
-              style={styles.input}
-            />
+            <TouchableOpacity
+              style={styles.datePickerButton}
+              onPress={() => setShowEventDatePicker(true)}
+            >
+              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+              <Text style={eventDate ? styles.datePickerText : styles.datePickerPlaceholder}>
+                {eventDate ? formatBirthdayDisplay(eventDate) : 'Select date'}
+              </Text>
+            </TouchableOpacity>
+            {showEventDatePicker && (
+              <View style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <Text style={styles.datePickerTitle}>Select Date</Text>
+                  <TouchableOpacity 
+                    onPress={() => setShowEventDatePicker(false)}
+                    style={styles.datePickerDone}
+                  >
+                    <Text style={styles.datePickerDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={eventDate || new Date()}
+                  mode="date"
+                  display="spinner"
+                  onChange={handleEventDateChange}
+                  minimumDate={new Date(1900, 0, 1)}
+                  maximumDate={new Date(2100, 11, 31)}
+                  style={styles.datePicker}
+                />
+              </View>
+            )}
 
             <Text style={styles.label}>Event Type</Text>
             <View style={styles.eventTypeRow}>
@@ -834,6 +849,64 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     paddingTop: spacing.md,
   },
+
+  // Date picker styles
+  datePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+    gap: spacing.sm,
+  },
+  datePickerText: {
+    fontSize: 16,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  datePickerPlaceholder: {
+    fontSize: 16,
+    color: colors.textMuted,
+    flex: 1,
+  },
+  datePickerContainer: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+    overflow: 'hidden',
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceBorder,
+    backgroundColor: colors.surfaceMuted,
+  },
+  datePickerTitle: {
+    ...typography.label,
+    color: colors.textPrimary,
+  },
+  datePickerDone: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  datePickerDoneText: {
+    ...typography.label,
+    color: colors.primary,
+  },
+  datePicker: {
+    height: 200,
+    backgroundColor: colors.surface,
+  },
+
   cadenceRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

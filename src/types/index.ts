@@ -1,13 +1,26 @@
 // User and Profile Types
 // src/types/index.ts
+
+export interface CallAvailability {
+  startTime: string; // Format: "HH:MM" (24-hour)
+  endTime: string;   // Format: "HH:MM" (24-hour)
+  daysAvailable: DayOfWeek[];
+}
+
+export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
 export interface User {
   id: string;
   email: string;
   username: string;
   firstName: string;
   lastName: string;
+  phone?: string;
+  bio?: string;
+  location?: string;
   profileImage?: string;
   birthday?: string | null;
+  callAvailability?: CallAvailability;
   createdAt: string;
   updatedAt: string;
 }
